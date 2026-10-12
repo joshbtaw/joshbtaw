@@ -1,6 +1,7 @@
 """Regenerate dark_mode.svg / light_mode.svg with live GitHub stats.
 
-Runs daily via GitHub Actions. Stdlib only, no dependencies.
+Run by hand, no stored tokens:  GITHUB_TOKEN=$(gh auth token) python update_profile.py
+Stdlib only, no dependencies.
 Art comes from avatar_to_ascii.py -- rerun it whenever the profile picture changes.
 """
 import calendar
@@ -55,11 +56,7 @@ ART = r"""
                ..-+%%%%%=-=++++++**#%%%%#*+-:..::::...+%%%%#*=...
 """
 
-# two tokens by design: the Actions GITHUB_TOKEN yields the contribution-style
-# commit count (public + private activity), while a PAT (ACCESS_TOKEN secret)
-# sees private repos for the repo list and LOC walk. Either falls back to the other.
-TOKEN = os.environ.get("GITHUB_TOKEN") or os.environ.get("ACCESS_TOKEN") or ""
-PRIV_TOKEN = os.environ.get("ACCESS_TOKEN") or TOKEN
+TOKEN = PRIV_TOKEN = os.environ["GITHUB_TOKEN"]
 
 
 def gh(url, payload=None, token=None):
@@ -108,10 +105,11 @@ def fetch_stats():
         followers {{ totalCount }}
         repositories(first: 100, ownerAffiliations: OWNER) {{
           totalCount
-          nodes {{ name stargazerCount isFork }}
+          nodes {{ nameWithOwner stargazerCount isFork }}
         }}
-        repositoriesContributedTo(first: 1, contributionTypes: [COMMIT, PULL_REQUEST, REPOSITORY]) {{
+        repositoriesContributedTo(first: 100, contributionTypes: [COMMIT, PULL_REQUEST, REPOSITORY]) {{
           totalCount
+          nodes {{ nameWithOwner isFork }}
         }}
       }}
     }}""", token=PRIV_TOKEN)["user"]
@@ -129,7 +127,8 @@ def fetch_stats():
         "stars": sum(n["stargazerCount"] for n in u["repositories"]["nodes"] + p["repositories"]["nodes"]),
         "commits": commits,
     }
-    stats.update(loc([n["name"] for n in u["repositories"]["nodes"] if not n["isFork"]], u["id"]))
+    repos = u["repositories"]["nodes"] + u["repositoriesContributedTo"]["nodes"]
+    stats.update(loc({n["nameWithOwner"] for n in repos if not n["isFork"]}, u["id"]))
     return stats
 
 
@@ -147,14 +146,14 @@ query($owner: String!, $name: String!, $id: ID!, $cursor: String) {
 
 
 def loc(repo_names, user_id):
-    # ponytail: REST stats/contributors answers 202 forever to the Actions token,
-    # so walk own commits on the default branch via GraphQL instead
+    # walk own commits on each repo's default branch (owned + contributed-to)
     add = rem = 0
-    for name in repo_names:
+    for full in repo_names:
+        owner, name = full.split("/")
         cursor = None
         try:
             while True:
-                ref = graphql(LOC_QUERY, {"owner": USER, "name": name, "id": user_id, "cursor": cursor}, token=PRIV_TOKEN)["repository"]["defaultBranchRef"]
+                ref = graphql(LOC_QUERY, {"owner": owner, "name": name, "id": user_id, "cursor": cursor}, token=PRIV_TOKEN)["repository"]["defaultBranchRef"]
                 if ref is None:
                     break  # empty repo
                 h = ref["target"]["history"]
@@ -164,7 +163,7 @@ def loc(repo_names, user_id):
                     break
                 cursor = h["pageInfo"]["endCursor"]
         except Exception as e:
-            print(f"loc {name}: {e}")
+            print(f"loc {full}: {e}")
     return {"loc_add": add, "loc_del": rem, "loc": add - rem}
 
 
