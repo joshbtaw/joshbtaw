@@ -1,6 +1,7 @@
 """Regenerate dark_mode.svg / light_mode.svg with live GitHub stats.
 
-Run by hand, no stored tokens:  GITHUB_TOKEN=$(gh auth token) python update_profile.py
+Stats, by hand (no stored tokens):  GITHUB_TOKEN=$(gh auth token) python update_profile.py
+Uptime only, daily via Actions:      python update_profile.py --uptime  (re-renders from stats.json)
 Stdlib only, no dependencies.
 Art comes from avatar_to_ascii.py -- rerun it whenever the profile picture changes.
 """
@@ -8,6 +9,7 @@ import calendar
 import html
 import json
 import os
+import sys
 import urllib.request
 from datetime import date, datetime, timezone
 
@@ -56,7 +58,7 @@ ART = r"""
                ..-+%%%%%=-=++++++**#%%%%#*+-:..::::...+%%%%#*=...
 """
 
-TOKEN = PRIV_TOKEN = os.environ["GITHUB_TOKEN"]
+TOKEN = PRIV_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
 
 def gh(url, payload=None, token=None):
@@ -244,7 +246,11 @@ def selfcheck():
 
 if __name__ == "__main__":
     selfcheck()
-    stats = fetch_stats()
+    if "--uptime" in sys.argv:
+        stats = json.load(open("stats.json"))
+    else:
+        stats = fetch_stats()
+        json.dump(stats, open("stats.json", "w"), indent=2)
     print("stats:", stats)
     for mode in PALETTES:
         with open(f"{mode}_mode.svg", "w", encoding="utf-8") as f:
